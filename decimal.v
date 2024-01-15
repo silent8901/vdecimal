@@ -676,11 +676,9 @@ pub fn (d Decimal) round_cash(interval i32) Decimal {
                         panic('Decimal does not support this Cash rounding interval ${interval}. Supported: 5, 10, 25, 50, 100')
                 }
         }
-        mut d_val := Decimal{
-                value: i_val
-        }
 
-        return ((d * d_val).round_half_up(0) / d_val).truncate(2)
+        d_val := value_of(i_val.str())
+        return d.mul_scale(d_val, 0, Round.round_half_up).div_scale(d_val, 2, Round.truncate)
 }
 
 // floor returns the nearest integer value less than or equal to d.
