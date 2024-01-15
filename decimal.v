@@ -6,6 +6,27 @@ import strings
 
 const division_precision = 21
 
+const zero = value_of(0)
+const one = value_of(1)
+const two = value_of(2)
+const three = value_of(3)
+const four = value_of(4)
+const five = value_of(5)
+const six = value_of(6)
+const seven = value_of(7)
+const eight = value_of(8)
+const nine = value_of(9)
+const ten = value_of(10)
+const twenty = value_of(20)
+const thirty = value_of(30)
+const forty = value_of(40)
+const fifty = value_of(50)
+const sixty = value_of(60)
+const seventy = value_of(70)
+const eighty = value_of(80)
+const ninety = value_of(90)
+const one_hundred = value_of(100)
+
 pub enum Round {
 	round_up        = 1
 	round_down
