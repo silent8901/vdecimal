@@ -3,6 +3,8 @@ module vdecimal
 import math.big
 import math
 import strings
+import strconv
+import regex
 
 const division_precision = 21
 
@@ -39,7 +41,7 @@ pub enum Round {
         truncate
 }
 
-type ValueOfType = i32 | i64 | int | string | u32 | u64
+type ValueOfType = f32 | f64 | i32 | i64 | int | string | u32 | u64
 
 pub struct Decimal {
         value big.Integer
@@ -72,9 +74,21 @@ pub fn value_of(value ValueOfType) Decimal {
 }
 
 // from_string creates a new Decimal from the given string value.
-pub fn from_string(value string) Decimal {
+pub fn from_string(value1 string) Decimal {
         mut int_string := ''
-        mut exp := 0
+        mut exp := i64(0)
+        mut value := value1
+
+        e_index := value.index_any('Ee')
+
+        if e_index != -1 {
+                exp_int := strconv.parse_int(value[e_index + 1..], 10, 32) or {
+                        panic("can't convert ${value} to decimal: exponent is not numeric")
+                }
+
+                value = value[..e_index]
+                exp = exp_int
+        }
 
         mut p_index := -1
         for i := 0; i < value.len; i++ {
@@ -94,15 +108,62 @@ pub fn from_string(value string) Decimal {
                 } else {
                         int_string = value.substr(0, p_index)
                 }
-                exp -= value.substr(p_index + 1, value.len).len
+
+                if p_index + 1 < value.len {
+                        int_string = value[..p_index] + value[p_index + 1..]
+                } else {
+                        int_string = value[..p_index]
+                }
+                exp_int := -(value[p_index + 1..]).len
+                exp += i64(exp_int)
         }
-        d_value := big.integer_from_string(int_string) or {
-                panic('can\'t convert ${value} to decimal')
+
+        mut d_value := big.zero_int
+
+        // strconv.ParseInt is faster than new(big.Int).SetString so this is just a shortcut for strings we know won't overflow
+        if int_string.len <= 18 {
+                parsed64 := strconv.parse_int(int_string, 10, 64) or {
+                        panic("can't convert ${value} to decimal")
+                }
+
+                d_value = big.integer_from_i64(parsed64)
+        } else {
+                d_value = big.integer_from_radix(int_string, 10) or {
+                        panic("can't convert ${value} to decimal")
+                }
         }
+
+        if exp < math.min_i32 || exp > math.max_i32 {
+                panic("can't convert ${value1} to to decimal: fractional part too long")
+
+                // NOTE(vadim): I doubt a string could realistically be this long
+        }
+
         return Decimal{
                 value: d_value
-                exp: exp
+                exp: i32(exp)
         }
+}
+
+// NewFromFormattedString returns a new Decimal from a formatted string representation.
+// The second argument - replRegexp, is a regular expression that is used to find characters that should be
+// removed from given decimal string representation. All matched characters will be replaced with an empty string.
+//
+// Example:
+//
+//     r := regexp.MustCompile("[$,]")
+//     d1, err := NewFromFormattedString("$5,125.99", r)
+//
+//     r2 := regexp.MustCompile("[_]")
+//     d2, err := NewFromFormattedString("1_000_000", r2)
+//
+//     r3 := regexp.MustCompile("[USD\\s]")
+//     d3, err := NewFromFormattedString("5000 USD", r3)
+//
+fn from_formatted_string(value string, mut re regex.RE) Decimal {
+        parsed_value := re.replace(value, '')
+        d := from_string(parsed_value)
+        return d
 }
 
 // from_int creates a new Decimal from the given int value.
@@ -135,6 +196,38 @@ pub fn from_u64(a u64) Decimal {
                 value: big.integer_from_u64(a)
                 exp: 0
         }
+}
+
+// from_big_integer returns a new Decimal from a big.Int, value * 10 ^ exp
+fn from_big_integer(value big.Integer, exp i32) Decimal {
+        return Decimal{
+                value: value
+                exp: exp
+        }
+}
+
+// from_f64 converts a f32 to Decimal.
+pub fn from_f32(value f32) Decimal {
+        if value == 0 {
+                return new(0, 0)
+        }
+        if math.is_nan(value) || math.is_inf(value, 0) {
+                panic('Cannot create a Decimal from ${value}')
+        }
+
+        return from_string(value.str())
+}
+
+// from_f64 converts a f64 to Decimal.
+pub fn from_f64(value f64) Decimal {
+        if value == 0 {
+                return new(0, 0)
+        }
+        if math.is_nan(value) || math.is_inf(value, 0) {
+                panic('Cannot create a Decimal from ${value}')
+        }
+
+        return from_string(value.str())
 }
 
 // int_part returns the integer component of the decimal.
@@ -347,6 +440,81 @@ pub fn (a Decimal) cmp(b Decimal) int {
         } else {
                 return 1
         }
+}
+
+// equal returns whether the numbers represented by d and d2 are equal.
+pub fn (d Decimal) equal(d2 Decimal) bool {
+        return d.cmp(d2) == 0
+}
+
+// greater_than (GT) returns true when d is greater than d2.
+pub fn (d Decimal) greater_than(d2 Decimal) bool {
+        return d.cmp(d2) == 1
+}
+
+// greater_than_or_equal (GTE) returns true when d is greater than or equal to d2.
+pub fn (d Decimal) greater_than_or_equal(d2 Decimal) bool {
+        cmp := d.cmp(d2)
+        return cmp == 1 || cmp == 0
+}
+
+// less_than (LT) returns true when d is less than d2.
+pub fn (d Decimal) less_than(d2 Decimal) bool {
+        return d.cmp(d2) == -1
+}
+
+// less_than_or_equal (LTE) returns true when d is less than or equal to d2.
+pub fn (d Decimal) less_than_or_equal(d2 Decimal) bool {
+        cmp := d.cmp(d2)
+        return cmp == -1 || cmp == 0
+}
+
+// sign returns:
+//
+//      -1 if d <  0
+//       0 if d == 0
+//      +1 if d >  0
+//
+pub fn (d Decimal) sign() int {
+        return d.value.signum
+}
+
+// is_positive return
+//
+//      true if d > 0
+//      false if d == 0
+//      false if d < 0
+pub fn (d Decimal) is_positive() bool {
+        return d.sign() == 1
+}
+
+// is_negative return
+//
+//      true if d < 0
+//      false if d == 0
+//      false if d > 0
+pub fn (d Decimal) is_negative() bool {
+        return d.sign() == -1
+}
+
+// is_zero return
+//
+//      true if d == 0
+//      false if d > 0
+//      false if d < 0
+pub fn (d Decimal) is_zero() bool {
+        return d.sign() == 0
+}
+
+// exponent returns the exponent, or scale component of the decimal.
+pub fn (d Decimal) exponent() int {
+        return d.exp
+}
+
+// coefficient returns the coefficient of the decimal. It is scaled by 10^Exponent()
+pub fn (d Decimal) coefficient() big.Integer {
+        // we copy the coefficient so that mutating the result does not mutate the Decimal.
+        return d.value
 }
 
 // abs calculates absolute value of any i32. Used for calculating absolute value of decimal's exponent.  
