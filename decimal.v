@@ -68,6 +68,10 @@ pub fn value_of(value ValueOfType) Decimal {
                 return from_u64(value)
         } else if value is string {
                 return from_string(value)
+        }  else if value is f32 {
+                return from_f32(value)
+        }  else if value is f64 {
+                return from_f64(value)
         }
 
         panic('can\'t convert ${typeof(value).name} type to decimal')
